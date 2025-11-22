@@ -13,7 +13,7 @@ app = FastAPI(title="Order Management API")
 
 # Initialize Firebase -- THIS IS THE ONLY PLACE initialize_app() SHOULD BE CALLED
 # Ensure 'path/to/serviceAccountKey.json' is the CORRECT PATH to your downloaded key!
-cred = credentials.Certificate('path/to/serviceAccountKey.json')
+cred = credentials.Certificate('./secrets/firebasekey.json')
 firebase_admin.initialize_app(cred)
 
 # These are global for main.py's direct routes, but ocr.py will use its own Dependency Injection
