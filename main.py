@@ -1,3 +1,4 @@
+# main.py (or your primary FastAPI app file)
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel
 import firebase_admin
@@ -5,17 +6,21 @@ from firebase_admin import credentials, firestore
 from datetime import datetime
 from typing import Optional
 
+# Import your new ocr_router
+from ocr import ocr_router # Assuming ocr.py is in the same directory
+
 app = FastAPI(title="Order Management API")
 
-# Initialize Firebase
+# Initialize Firebase -- THIS IS THE ONLY PLACE initialize_app() SHOULD BE CALLED
+# Ensure 'path/to/serviceAccountKey.json' is the CORRECT PATH to your downloaded key!
 cred = credentials.Certificate('path/to/serviceAccountKey.json')
 firebase_admin.initialize_app(cred)
-db = firestore.client()
 
-# Collection reference
+# These are global for main.py's direct routes, but ocr.py will use its own Dependency Injection
+db = firestore.client()
 orders_ref = db.collection('orders')
 
-# Pydantic models
+# Pydantic models (your existing code)
 class OrderCreate(BaseModel):
     customer_name: str
     product: str
@@ -39,7 +44,10 @@ class OrderResponse(BaseModel):
     status: str
     created_at: str
 
-# CREATE - Add new order
+# Include the OCR router!
+app.include_router(ocr_router)
+
+# Your existing CRUD endpoints go here, using 'app.' decorator
 @app.post("/orders", response_model=OrderResponse, status_code=status.HTTP_201_CREATED)
 async def create_order(order: OrderCreate):
     order_data = {
@@ -51,8 +59,7 @@ async def create_order(order: OrderCreate):
         'created_at': datetime.utcnow().isoformat()
     }
     
-    # Add to Firestore
-    doc_ref = orders_ref.add(order_data)
+    doc_ref = orders_ref.add(order_data) # Using main.py's global orders_ref
     order_id = doc_ref[1].id
     
     order_data['id'] = order_id
@@ -99,13 +106,11 @@ async def update_order(order_id: str, order: OrderUpdate):
             detail="Order not found"
         )
     
-    # Update only provided fields
     update_data = order.dict(exclude_unset=True)
     
     if update_data:
         doc_ref.update(update_data)
     
-    # Get updated document
     updated_doc = doc_ref.get()
     order_data = updated_doc.to_dict()
     order_data['id'] = updated_doc.id
@@ -136,3 +141,4 @@ async def root():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
