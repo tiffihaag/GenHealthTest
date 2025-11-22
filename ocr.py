@@ -10,12 +10,12 @@ from google.api_core.client_options import ClientOptions
 
 # --- Pydantic Models (Temporarily defined here for demonstration) ---
 from pydantic import BaseModel
-class OrderCreate(BaseModel):
-    customer_name: str
-    product: str
-    quantity: int
-    total_price: float
-    status: Optional[str] = 'pending'
+# New Pydantic Model for Patient Info Extraction
+class PatientInfo(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    date_of_birth: Optional[str] = None # Using string for flexibility, you might convert to date object later
+
 
 class OrderResponse(BaseModel):
     id: str
@@ -135,17 +135,71 @@ async def create_order_from_pdf(
             detail="Could not extract text from the provided PDF using Document AI (returned empty text)."
         )
 
-    # --- TEMPORARY MOCK FOR LOCAL TESTING ---
-    # This section simulates the response from your GenKit Cloud Function.
-    # REMOVE/UNCOMMENT the httpx call below once your GenKit function is deployed!
-    print("MOCKING GenKit AI response for local testing...")
-    ai_extracted_data = {
-        "customer_name": "Test Customer from PDF",
-        "product": "Test Product from PDF",
-        "quantity": 1,
-        "total_price": 99.99,
-        "status": "processed-by-ai"
+        # --- CALL GENKIT CLOUD FUNCTION ---
+    print("Calling GenKit Cloud Function to extract patient info...")
+    
+    # This will hold the structured data extracted by GenKit
+    patient_info_from_ai: PatientInfo
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                GENKIT_EXTRACT_ORDER_URL,
+                json={"pdf_text": extracted_text} # Send the OCR'd text to GenKit
+            )
+            response.raise_for_status() # Raise an exception for 4xx/5xx responses
+
+            # Parse the JSON response from GenKit into our Pydantic model
+            patient_info_from_ai = PatientInfo(**response.json())
+            print(f"Extracted by GenKit: First Name: {patient_info_from_ai.first_name}, "
+                  f"Last Name: {patient_info_from_ai.last_name}, "
+                  f"DOB: {patient_info_from_ai.date_of_birth}")
+
+    except httpx.HTTPStatusError as e:
+        print(f"Error from GenKit AI Logic (HTTP Status {e.response.status_code}): {e.response.text}")
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail=f"Error from AI Logic: {e.response.text}"
+        )
+    except Exception as e:
+        print(f"Error communicating with GenKit AI Logic or processing its response: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error communicating with AI Logic or processing its response: {e}"
+        )
+    # --- End GenKit call section ---
+        
+    # 3. Use your existing Firestore logic to save the extracted order
+    # For now, let's just save the extracted patient info, alongside a dummy order
+    order_data = {
+        'customer_name': f"{patient_info_from_ai.first_name or ''} {patient_info_from_ai.last_name or ''}".strip(),
+        'first_name': patient_info_from_ai.first_name, # Storing separately
+        'last_name': patient_info_from_ai.last_name,   # Storing separately
+        'date_of_birth': patient_info_from_ai.date_of_birth, # Storing separately
+        'product': "Extracted from PDF (placeholder)", # You'll need GenKit to get this too
+        'quantity': 1, # Placeholder
+        'total_price': 0.00, # Placeholder
+        'status': "info-extracted-pending-order",
+        'created_at': datetime.utcnow().isoformat()
     }
+    
+    doc_ref = orders_collection.add(order_data)
+    order_id = doc_ref[1].id
+    
+    order_data['id'] = order_id
+    
+    # You might want to return the PatientInfo or a combined OrderResponse
+    # For now, let's make the OrderResponse reflect what we're saving
+    return OrderResponse(
+        id=order_id,
+        customer_name=order_data['customer_name'],
+        product=order_data['product'],
+        quantity=order_data['quantity'],
+        total_price=order_data['total_price'],
+        status=order_data['status'],
+        created_at=order_data['created_at']
+    )
+
     
     order_data_for_firestore = OrderCreate(**ai_extracted_data)
 
