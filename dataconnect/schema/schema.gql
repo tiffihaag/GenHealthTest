@@ -1,0 +1,47 @@
+type User @table {
+  displayName: String!
+  email: String!
+  createdAt: Timestamp!
+  organization: String
+  role: String
+}
+
+type PdfDocument @table {
+  user: User
+  fileName: String!
+  storagePath: String!
+  uploadDate: Timestamp!
+  status: String!
+  originalContentHash: String
+}
+
+type ExtractedData @table {
+  pdfDocument: PdfDocument
+  dataFields: String!
+  extractionTimestamp: Timestamp!
+  confidenceScore: Float
+  validationStatus: String
+}
+
+type MedicalApi @table {
+  apiName: String!
+  baseUrl: String!
+  authenticationMethod: String!
+  createdAt: Timestamp!
+  description: String
+  apiKey: String
+  endpointPaths: String
+}
+
+type ApiTransaction @table {
+  user: User
+  medicalApi: MedicalApi
+  extractedData: ExtractedData
+  requestPayload: String!
+  responsePayload: String!
+  statusCode: Int!
+  transactionDate: Timestamp!
+  status: String!
+  errorMessage: String
+  externalTransactionId: String
+}
