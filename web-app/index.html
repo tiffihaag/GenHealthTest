@@ -1,13 +1,135 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>web-app</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Patient Info Extractor</title>
+    <style>
+        body { font-family: sans-serif; margin: 2em; }
+        textarea { width: 90%; height: 150px; margin-bottom: 1em; }
+        input[type="file"] { margin-bottom: 1em; font-size: 1em; }
+        #result { background-color: #f4f4f4; padding: 1em; border-radius: 5px; min-height: 60px; line-height: 1.6; }
+        #error { color: red; }
+    </style>
+</head>
+<body>
+
+    <h1>Patient Information Extractor</h1>
+    <p>Upload a patient document (PDF) to extract information.</p>
+
+    <input type="file" id="pdfUpload" accept="application/pdf">
+
+    <h2>Result:</h2>
+    <div id="result"></div>
+    <p id="error"></p>
+
+    <!-- Import the Firebase SDKs -->
+    <script type="module">
+        // Import the pdf.js library
+        import * as pdfjsLib from "https://mozilla.github.io/pdf.js/build/pdf.mjs";
+
+        // 1. Import the necessary Firebase functions
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+        import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
+
+        // 2. PASTE YOUR WEB APP'S FIREBASE CONFIGURATION HERE
+        // Your web app's Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyD54pvRYxMVbxPA5gfDfRAvqoPpT4326ss",
+            authDomain: "genh-f43c3.firebaseapp.com",
+            projectId: "genh-f43c3",
+            storageBucket: "genh-f43c3.firebasestorage.app",
+            messagingSenderId: "53056124778",
+            appId: "1:53056124778:web:5f71b204ef1ceafb735713",
+            measurementId: "G-8BRGJ06VZ8"
+        };
+
+        // 3. Initialize Firebase and get a reference to the Functions service
+        const app = initializeApp(firebaseConfig);
+        const functions = getFunctions(app);
+
+        // Set the worker source for pdf.js
+        pdfjsLib.GlobalWorkerOptions.workerSrc = "https://mozilla.github.io/pdf.js/build/pdf.worker.mjs";
+
+        // 4. Get a reference to your specific callable function.
+        // The name 'extractPatientInfo' MUST match the name you exported in src/index.ts
+        const extractPatientInfo = httpsCallable(functions, 'extractPatientInfo');
+
+        // 5. Get references to the HTML elements
+        const pdfUpload = document.getElementById('pdfUpload');
+        const resultElement = document.getElementById('result');
+        const errorElement = document.getElementById('error');
+
+        // 6. Add a change event listener to the file input
+        pdfUpload.addEventListener('change', async (event) => {
+            const file = event.target.files[0];
+            if (!file || file.type !== 'application/pdf') {
+                alert("Please select a PDF file.");
+                return;
+            }
+
+            // Clear previous results and disable input
+            errorElement.textContent = '';
+            pdfUpload.disabled = true;
+
+            try {
+                resultElement.textContent = 'Reading PDF...';
+                const pdfText = await extractTextFromPdf(file);
+
+                resultElement.textContent = 'Extracting information...';
+                console.log("Calling cloud function 'extractPatientInfo'...");
+
+                // Call the function with the extracted text
+                const result = await extractPatientInfo({ pdf_text: pdfText });
+
+                const extractedData = result.data; // The data returned from your flow
+                console.log("Function returned successfully:", extractedData);
+
+                // Format the data into readable HTML instead of raw JSON
+                if (extractedData && (extractedData.firstName || extractedData.lastName || extractedData.dob)) {
+                    resultElement.innerHTML = `
+                        <p><strong>First Name:</strong> ${extractedData.firstName || 'Not found'}</p>
+                        <p><strong>Last Name:</strong> ${extractedData.lastName || 'Not found'}</p>
+                        <p><strong>Date of Birth:</strong> ${extractedData.dob || 'Not found'}</p>
+                    `;
+                } else {
+                    resultElement.textContent = 'Could not extract patient information. The document might not contain the required fields or is not machine-readable.';
+                }
+
+            } catch (error) {
+                console.error("Error calling function:", error);
+                errorElement.textContent = `Error: ${error.message}`;
+                resultElement.textContent = 'An error occurred.';
+            } finally {
+                pdfUpload.disabled = false; // Re-enable the input
+                pdfUpload.value = ''; // Reset file input
+            }
+        });
+
+        /**
+         * Extracts text from a PDF file.
+         * @param {File} file - The PDF file object.
+         * @returns {Promise<string>} A promise that resolves with the text content.
+         */
+        async function extractTextFromPdf(file) {
+            const fileReader = new FileReader();
+            return new Promise((resolve, reject) => {
+                fileReader.onload = async function() {
+                    try {
+                        const typedarray = new Uint8Array(this.result);
+                        const pdf = await pdfjsLib.getDocument(typedarray).promise;
+                        let fullText = '';
+                        for (let i = 1; i <= pdf.numPages; i++) {
+                            const page = await pdf.getPage(i);
+                            const textContent = await page.getTextContent();
+                            fullText += textContent.items.map(item => item.str).join(' ') + '\n';
+                        }
+                        resolve(fullText);
+                    } catch (error) { reject(error); }
+                };
+                fileReader.readAsArrayBuffer(file);
+            });
+        }
+    </script>
+</body>
 </html>
